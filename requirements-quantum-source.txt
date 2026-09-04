@@ -1,0 +1,8 @@
+qiskit
+qiskit-aer
+qutip
+numpy
+scipy
+matplotlib
+streamlit
+reportlab

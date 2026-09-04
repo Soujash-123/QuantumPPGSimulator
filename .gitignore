@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+*.whl
+
+# Virtual environments — runtime infrastructure, not source
+myenv/
+venv/
+.venv/
+env/
+.env
+
+# Per-package __pycache__
+*/__pycache__/
+*/*/__pycache__/
+*/*/*/__pycache__/
+
+# Matplotlib runtime cache
+.mplconfig/
+.mpl-cache/
+
+# Python tool caches
+.pytest_cache/
+.coverage
+htmlcov/
+.doctrees/
+*.log
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Project-generated outputs — these are produced by demos/runs
+quantum_ppg_output/
+quantum_source_output/
+*.pdf
+
+# Streamlit cache
+.streamlit/
+
+# Qodo / local dev tooling
+.qodo/
+
+# qutip_coeffs is a runtime data directory, not source
+qutip_coeffs_1.1/
