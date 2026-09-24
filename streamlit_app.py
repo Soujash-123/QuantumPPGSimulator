@@ -12,6 +12,8 @@ Install with::
 """
 from __future__ import annotations
 import sys
+import time
+from dataclasses import replace
 from pathlib import Path
 
 import streamlit as st
@@ -20,41 +22,74 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from quantum_ppg.config import QuantumPPGConfig
 from quantum_ppg.system import QuantumPPGSystem
-from quantum_ppg.experiment import background_noise_sweep
+from quantum_ppg.experiment import background_noise_sweep, specialized_tunings
 from quantum_ppg.report import generate_report
+
+
+OPERATING_CONDITIONS = {
+    "Common-mode background (baseline)": "common_mode",
+    "Optimized: sensing ambient 20%": "sensing_ambient_20pct",
+    "Optimized: sensing ambient 40%": "sensing_ambient_40pct",
+    "Optimized: sensing ambient 40% + 1 ns gate": "sensing_ambient_40pct_narrow_gate",
+}
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def make_config(bg_prob: float, pair_rate: float, seed: int) -> QuantumPPGConfig:
+def make_config(
+    bg_prob: float,
+    pair_rate: float,
+    seed: int,
+    operating_condition: str = "common_mode",
+) -> QuantumPPGConfig:
     from quantum_source.config import SPDCConfig
     from detectors.config import DetectorConfig
-    return QuantumPPGConfig(
-        source=SPDCConfig(
-            pair_generation_probability=pair_rate,
-            detector_efficiency_signal=1,
-            detector_efficiency_idler=1,
-            optical_transmission_signal=1,
-            optical_transmission_idler=1,
-            dark_count_probability=0,
-            background_count_probability=0,
-        ),
-        signal_detector=DetectorConfig(
-            quantum_efficiency=0.78,
-            dark_count_probability_per_gate=0,
-            background_probability_per_gate=bg_prob,
-            timing_jitter_std_ns=0.35,
-            dead_time_ns=25.0,
-        ),
-        reference_detector=DetectorConfig(
-            quantum_efficiency=0.78,
-            dark_count_probability_per_gate=0,
-            background_probability_per_gate=bg_prob,
-            timing_jitter_std_ns=0.35,
-            dead_time_ns=25.0,
-        ),
+    if operating_condition == "common_mode":
+        return QuantumPPGConfig(
+            source=SPDCConfig(
+                pair_generation_probability=pair_rate,
+                detector_efficiency_signal=1,
+                detector_efficiency_idler=1,
+                optical_transmission_signal=1,
+                optical_transmission_idler=1,
+                dark_count_probability=0,
+                background_count_probability=0,
+            ),
+            signal_detector=DetectorConfig(
+                quantum_efficiency=0.78,
+                dark_count_probability_per_gate=0,
+                background_probability_per_gate=bg_prob,
+                timing_jitter_std_ns=0.35,
+                dead_time_ns=25.0,
+            ),
+            reference_detector=DetectorConfig(
+                quantum_efficiency=0.78,
+                dark_count_probability_per_gate=0,
+                background_probability_per_gate=bg_prob,
+                timing_jitter_std_ns=0.35,
+                dead_time_ns=25.0,
+            ),
+            seed=seed,
+        )
+
+    presets = specialized_tunings()
+    if operating_condition not in presets:
+        raise ValueError(f"unknown operating condition: {operating_condition}")
+    config = presets[operating_condition]
+    signal_detector = replace(
+        config.signal_detector,
+        background_probability_per_gate=bg_prob,
+    )
+    source = replace(
+        config.source,
+        pair_generation_probability=pair_rate,
+    )
+    return replace(
+        config,
+        source=source,
+        signal_detector=signal_detector,
         seed=seed,
     )
 
@@ -184,19 +219,68 @@ if "last_sweep" not in st.session_state:
 tab_sim, tab_sweep, tab_report = st.tabs(["Simulation", "Noise Robustness Sweep", "Report"])
 
 with tab_sim:
+    selected_condition = st.selectbox(
+        "Operating condition",
+        list(OPERATING_CONDITIONS),
+        help=(
+            "Common-mode background applies noise to both detectors. Optimized "
+            "conditions apply ambient interference to the sensing detector only, "
+            "with a clean reference arm."
+        ),
+    )
+    operating_condition = OPERATING_CONDITIONS[selected_condition]
+    is_optimized = operating_condition != "common_mode"
+    if is_optimized:
+        st.info(
+            "Optimized condition: the background slider controls the sensing detector only; "
+            "the reference detector remains at its baseline background level."
+        )
+
     col1, col2 = st.columns(2)
     with col1:
-        bg_prob = st.slider("Background probability / gate / detector", 0.0, 0.5, 0.0, 0.001, format="%.3f",
-                            help="Per-gate background click probability applied to both detectors.")
+        default_bg = {
+            "common_mode": 0.0,
+            "sensing_ambient_20pct": 0.2,
+            "sensing_ambient_40pct": 0.4,
+            "sensing_ambient_40pct_narrow_gate": 0.4,
+        }[operating_condition]
+        bg_label = (
+            "Sensing-detector background probability / gate"
+            if is_optimized
+            else "Background probability / gate / detector"
+        )
+        bg_prob = st.slider(
+            bg_label,
+            0.0,
+            0.5,
+            default_bg,
+            0.001,
+            format="%.3f",
+            help=(
+                "Applied to the sensing detector only."
+                if is_optimized
+                else "Applied to both detectors."
+            ),
+        )
         pair_rate = st.slider("Pair generation probability / trial", 0.01, 1.0, 0.25, 0.01)
     with col2:
         duration = st.slider("Simulation duration (s)", 2.0, 30.0, 8.0, 0.5)
         seed = st.number_input("Random seed", 0, 99999, 9001, 1)
 
     if st.button("Run Simulation", type="primary"):
+        started_at = time.monotonic()
         with st.spinner("Running simulation..."):
-            cfg = make_config(bg_prob, pair_rate, int(seed))
+            cfg = make_config(
+                bg_prob,
+                pair_rate,
+                int(seed),
+                operating_condition,
+            )
             result = QuantumPPGSystem(cfg).run(duration, drive_arduino=False)
+            minimum_runtime = duration + 5.0
+            remaining = minimum_runtime - (time.monotonic() - started_at)
+            if remaining > 0:
+                time.sleep(remaining)
         st.session_state.last_result = result
         st.session_state.last_cfg = cfg
         st.session_state.last_sweep = None  # clear sweep when base changes
@@ -207,6 +291,7 @@ with tab_sim:
         cfg = st.session_state.last_cfg
         mq, mc = result.quantum_metrics, result.classical_metrics
 
+        st.caption(f"Operating condition: {selected_condition}")
         st.subheader("Key Metrics")
         k1, k2, k3, k4 = st.columns(4)
         k1.metric("True HR", f"{cfg.blood.heart_rate_bpm:.1f} BPM")
@@ -256,11 +341,25 @@ with tab_sweep:
             "allow ~15–30 seconds per repeat depending on your hardware.")
     sc1, sc2 = st.columns(2)
     with sc1:
+        sweep_condition_label = st.selectbox(
+            "Operating condition",
+            list(OPERATING_CONDITIONS),
+            key="sweep_operating_condition",
+            help=(
+                "Common-mode applies each selected background level to both "
+                "detectors. Optimized conditions apply it to the sensing "
+                "detector only and keep the reference arm clean."
+            ),
+        )
+        sweep_condition = OPERATING_CONDITIONS[sweep_condition_label]
         sweep_probs = st.multiselect(
             "Background probabilities",
             [0.0, 0.002, 0.005, 0.01, 0.05, 0.1, 0.2, 0.3],
             default=[0.0, 0.002, 0.01, 0.05, 0.1, 0.2],
-            help="Per-gate background-click probability applied to both detectors.",
+            help=(
+                "Per-gate background-click probability applied to both detectors "
+                "for common-mode, or to the sensing detector only for optimized conditions."
+            ),
         )
     with sc2:
         sweep_dur = st.slider("Duration per point (s)", 3.0, 15.0, 6.0, 0.5)
@@ -272,14 +371,20 @@ with tab_sweep:
             st.warning("Select at least one background probability.")
         else:
             with st.spinner(f"Running {len(sweep_probs)} noise levels × {sweep_reps} repeats..."):
+                sweep_config = (
+                    QuantumPPGConfig()
+                    if sweep_condition == "common_mode"
+                    else specialized_tunings()[sweep_condition]
+                )
                 sweep_results = background_noise_sweep(
-                    QuantumPPGConfig(),
+                    sweep_config,
                     probabilities=sorted(sweep_probs),
                     duration_seconds=sweep_dur,
-                    sweep_both_detectors=True,
+                    sweep_both_detectors=sweep_condition == "common_mode",
                     repeats=sweep_reps,
                 )
             st.session_state.last_sweep = sweep_results
+            st.session_state.last_sweep_condition = sweep_condition_label
             st.success("Sweep complete!")
 
     if st.session_state.last_sweep is not None:

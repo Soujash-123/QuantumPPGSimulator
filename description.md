@@ -146,8 +146,11 @@ or semiconductor-physics simulation. Configuration values are simulation assumpt
   chronological orchestrator. It creates time bins, generates gates/pairs, propagates
   photons, detects events, performs coincidence conditioning, drives the Arduino twin,
   extracts both PPG signals, evaluates metrics, and returns `QuantumPPGResult`.
-- [`quantum_ppg/experiment.py`](./quantum_ppg/experiment.py) — Runs a configurable
-  signal-detector background-noise sweep and returns quantum/classical metric pairs.
+- [`quantum_ppg/experiment.py`](./quantum_ppg/experiment.py) — Runs configurable
+  background-noise and one-factor-at-a-time robustness sweeps for detector
+  background, coincidence window, detector efficiency, and run duration. It
+  also provides labeled specialized tuning presets for sensing-arm ambient
+  interference studies; these presets do not change the baseline defaults.
 - [`quantum_ppg/arduino_sketch.py`](./quantum_ppg/arduino_sketch.py) — Arduino-style
   acquisition sketch. It attaches D2/D3 rising-edge interrupts, samples A0, estimates
   heart rate from captured samples, and writes a serial report.

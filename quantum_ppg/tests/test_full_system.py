@@ -3,7 +3,11 @@ from dataclasses import replace
 import numpy as np
 from biosensor import BloodVolumeConfig, BloodVolumeModel, FingertipTissue, TissueConfig
 from quantum_ppg import QuantumPPGConfig, QuantumPPGSystem
-from quantum_ppg.experiment import background_noise_sweep
+from quantum_ppg.experiment import (
+    background_noise_sweep,
+    robustness_parameter_sweep,
+    specialized_tunings,
+)
 from detectors import DetectorConfig
 
 class TestFullQuantumPPG(unittest.TestCase):
@@ -42,5 +46,40 @@ class TestFullQuantumPPG(unittest.TestCase):
     def test_coincidence_conditioning_rejects_high_uncorrelated_background_under_model(self):
         _, quantum, classical=background_noise_sweep(QuantumPPGConfig(),probabilities=(.2,),duration_seconds=5)[0]
         self.assertGreater(quantum.correlation,classical.correlation)
+
+    def test_robustness_sweep_returns_reproducible_parameter_points(self):
+        points = robustness_parameter_sweep(
+            QuantumPPGConfig(),
+            background_probabilities=(0.0,),
+            coincidence_windows_ns=(5.0,),
+            detector_efficiencies=(0.78,),
+            durations_seconds=(1.0,),
+            repeats=1,
+        )
+        self.assertEqual(
+            [point.parameter for point in points],
+            [
+                "background_probability_per_gate",
+                "coincidence_window_ns",
+                "detector_quantum_efficiency",
+                "duration_seconds",
+            ],
+        )
+        self.assertTrue(all(np.isfinite(point.snr_delta_db) for point in points))
+
+    def test_specialized_tunings_preserve_baseline_and_are_labeled(self):
+        base = QuantumPPGConfig()
+        tunings = specialized_tunings(base)
+        self.assertEqual(
+            set(tunings),
+            {
+                "sensing_ambient_20pct",
+                "sensing_ambient_40pct",
+                "sensing_ambient_40pct_narrow_gate",
+            },
+        )
+        self.assertEqual(base.signal_detector.background_probability_per_gate, 0.0005)
+        self.assertEqual(tunings["sensing_ambient_40pct"].reference_detector, base.reference_detector)
+        self.assertEqual(tunings["sensing_ambient_40pct_narrow_gate"].source.coincidence_window_ns, 1.0)
 
 if __name__ == '__main__': unittest.main()
