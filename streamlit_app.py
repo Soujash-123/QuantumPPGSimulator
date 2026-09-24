@@ -22,8 +22,39 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from quantum_ppg.config import QuantumPPGConfig
 from quantum_ppg.system import QuantumPPGSystem
-from quantum_ppg.experiment import background_noise_sweep, specialized_tunings
+from quantum_ppg.experiment import background_noise_sweep
 from quantum_ppg.report import generate_report
+
+try:
+    from quantum_ppg.experiment import specialized_tunings
+except ImportError:
+    def specialized_tunings(config: QuantumPPGConfig | None = None):
+        """Compatibility fallback for deployments with an older experiment module."""
+        base = config or QuantumPPGConfig()
+        return {
+            "sensing_ambient_20pct": replace(
+                base,
+                signal_detector=replace(
+                    base.signal_detector,
+                    background_probability_per_gate=0.20,
+                ),
+            ),
+            "sensing_ambient_40pct": replace(
+                base,
+                signal_detector=replace(
+                    base.signal_detector,
+                    background_probability_per_gate=0.40,
+                ),
+            ),
+            "sensing_ambient_40pct_narrow_gate": replace(
+                base,
+                source=replace(base.source, coincidence_window_ns=1.0),
+                signal_detector=replace(
+                    base.signal_detector,
+                    background_probability_per_gate=0.40,
+                ),
+            ),
+        }
 
 
 OPERATING_CONDITIONS = {
